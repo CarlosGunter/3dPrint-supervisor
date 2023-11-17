@@ -1,0 +1,8 @@
+env
+dist
+images/*
+stl/*
+
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
