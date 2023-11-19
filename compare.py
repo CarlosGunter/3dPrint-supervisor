@@ -59,7 +59,8 @@ def get_piece (reference, clr_range, name):
   # kernel = np.ones((2,1), np.uint8)
   # mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
   # mask = cv2.morphologyEx(mask_v, cv2.MORPH_OPEN, kernel)
-  cv2.imwrite(f'images/mask_{name}.jpg', mask)
+  mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+  cv2.imwrite(f'images/mask_{name}.png', mask_bgr)
   return mask
 
 def toHSV (file):
@@ -76,24 +77,50 @@ def buscar_px (mask):
         break
   return pixel
 
-def match_sz (reference, match):
-  reference_invx = reference[::-1]
-  reference_invxy = reference_invx[:,::-1]
-  px_l = buscar_px(reference_invx)
-  px_r = len(reference[0]) - buscar_px(reference_invxy)
-  ref_sz = px_l - px_r
-  match_invx = match[::-1]
-  match_invxy = match_invx[:,::-1]
-  px_l = buscar_px(match_invx)
-  px_r = len(match[0]) - buscar_px(match_invxy)
-  match_sz = px_l - px_r
+def limits (mask):
+  top = len(mask) - buscar_px(np.fliplr(mask))[0]
+  button = buscar_px(mask)[0]
+  left = len(mask[0]) - buscar_px(np.rot90(mask, 1))[0]
+  right = buscar_px(np.rot90(mask, -1))[0]
+  return top, button, left, right
 
-  if (ref_sz - match_sz) < 4:
+# Iguala el tamaño y posicion de la pieza del render respecto a la
+# pieza de la referencia
+def match (reference, match):
+  model = np.zeros((np.shape(reference)[0], np.shape(reference)[1]), dtype='uint8')
+  ref_t, ref_b, ref_l, ref_r = limits(reference)
+  print(ref_t, ref_b, ref_l, ref_r)
+  ref_h = ref_b - ref_t # Alto
+  ref_w = ref_r - ref_l # Ancho
+  
+  mch_t, mch_b, mch_l, mch_r = limits(match)
+  print(mch_t, mch_b, mch_l, mch_r)
+  mch_h = mch_b - mch_t # Alto
+  mch_w = mch_r - mch_l # Ancho
+
+  # Tolerancia de 4px
+  if abs(ref_w - mch_w) < 4:
+    print('Igual')
     return match
   
-  if ref_sz > match_sz:
-    diff = ref_sz/match_sz
-    nw_sz = cv2.resize(match, None, fx=diff, fy=diff)
+  # if ref_w > mch_w:
+  diff_w = ref_w/mch_w
+  diff_h = ref_h/mch_h
+  nw_sz = cv2.resize(match, None, fx=diff_w, fy=diff_h)
+
+  nw_t, nw_b, nw_l, nw_r = limits(nw_sz)
+  nw_h = nw_b - nw_t
+  nw_w = nw_r - nw_l
+  print(nw_t, nw_b, nw_l, nw_r)
+  # if len(nw_sz) <= len(reference) or len(nw_sz[0]) <= len(reference[0]):
+  model[ref_t:(ref_t + nw_h), ref_l:(ref_l + nw_w)] = nw_sz[nw_t:nw_b, nw_l:nw_r]
+  a = nw_sz[nw_t:nw_b, nw_l:nw_r]
+  a_bgr = cv2.cvtColor(a, cv2.COLOR_GRAY2BGR)
+  cv2.imwrite('images/piece.png', a_bgr)
+
+  model_bgr = cv2.cvtColor(model, cv2.COLOR_GRAY2BGR)
+  cv2.imwrite('images/mask_match.png', model_bgr)
+  return model
 
 # Crea una imagen que representa los bordes de otra imagen 
 # pasada como parametro
@@ -123,21 +150,34 @@ def bordes (img, name):
         bd[row, column, :] = 0
       else:
         bd[row, column, :] = 255
-  cv2.imwrite(f'images/{name}_bd.jpg', bd)
 
-# bordes(model, 'model')
+  bd_bgr = cv2.cvtColor(bd, cv2.COLOR_GRAY2BGR)
+  cv2.imwrite(f'images/{name}_bd.png', bd_bgr)
 
-def init (photo, stl_img, color):
+def init (photo, stl_img, color=white):
+  # Cambiar el formato a HSV
   reference = cv2.cvtColor(photo, cv2.COLOR_BGR2HSV)
+  # Obtiene la mascara de color del filamento
   piece_ref = get_piece(reference, color, 'ref')
+  # Cambiar el formato a HSV
   model = cv2.cvtColor(stl_img, cv2.COLOR_BGR2HSV)
+  # Obtiene la mascara de color del render
   piece_mod = get_piece(model, color, 'mod')
-
-  error = compare(piece_ref, piece_mod)
-  print(error)
+  # Se iguala el tamaño y posicion de la pieza en la imagen del
+  # render, asi como el tamaño de imagen respecto a la fotografia
+  piece_mod = match(piece_ref, piece_mod)
+  # Obtiene graficemente las diferencias
   diff = cv2.subtract(piece_ref, piece_mod)
-  cv2.imwrite('images/ref_diff.jpg', diff)
+  # Obtiene las diferencias entre el modelo y la fotografia
+  error = compare(piece_ref, piece_mod)
+  # Calcula el porcentaje de error
+  percent = round((error*100)/(np.shape(piece_ref)[0]*np.shape(piece_ref)[1]), 2)
 
-photo = cv2.imread('images/foto.png')
-render = cv2.imread('images/render.png')
-init(photo, render, white)
+  diff_bgr = cv2.cvtColor(diff, cv2.COLOR_GRAY2BGR)
+  cv2.imwrite('images/ref_diff.png', diff_bgr)
+  
+  return percent
+
+# photo = cv2.imread('images/foto.png')
+# render = cv2.imread('images/render.png')
+# init(photo, render, white)
